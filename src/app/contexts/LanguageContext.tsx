@@ -69,6 +69,9 @@ const translations: Translations = {
   'painter.customDates': { en: 'Custom Dates', es: 'Fechas Personalizadas' },
   'painter.startDate': { en: 'Start Date', es: 'Fecha de Inicio' },
   'painter.endDate': { en: 'End Date', es: 'Fecha de Fin' },
+  'painter.pendingReview': { en: 'Pending review', es: 'Pendiente de revisión' },
+  'painter.approved': { en: 'Approved', es: 'Aprobado' },
+  'painter.submittingFor': { en: 'Submitting for', es: 'Enviando para' },
 
   'supervisor.projects': { en: 'Projects', es: 'Proyectos' },
   'supervisor.team': { en: 'Team', es: 'Equipo' },
