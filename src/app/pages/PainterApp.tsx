@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, Home, LogOut, MapPin, Send } from 'lucide-react';
+import { Calendar, Home, LogOut, MapPin, Send } from 'lucide-react';
 import { useAuth } from '@/app/contexts/AuthContext';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import {
@@ -49,6 +49,7 @@ export default function PainterApp() {
   const [loading, setLoading] = useState(false);
   const [requestProjectOpen, setRequestProjectOpen] = useState(false);
   const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionDefaultTab, setCorrectionDefaultTab] = useState<'propose' | 'missing'>('propose');
   const [view, setView] = useState<'landing' | 'calendar'>('landing');
 
   const projects = getProjects().filter((p) => p.active);
@@ -167,10 +168,20 @@ export default function PainterApp() {
           userId={currentUser.id}
           hourlyRate={currentUser.hourlyRate}
           onBack={() => setView('landing')}
-          onAddMissingShift={() => setCorrectionOpen(true)}
-          onProposeCorrection={() => setCorrectionOpen(true)}
+          onAddMissingShift={() => {
+            setCorrectionDefaultTab('missing');
+            setCorrectionOpen(true);
+          }}
+          onProposeCorrection={() => {
+            setCorrectionDefaultTab('propose');
+            setCorrectionOpen(true);
+          }}
         />
-        <ShiftCorrectionDialog open={correctionOpen} onOpenChange={setCorrectionOpen} />
+        <ShiftCorrectionDialog
+          open={correctionOpen}
+          onOpenChange={setCorrectionOpen}
+          defaultTab={correctionDefaultTab}
+        />
       </>
     );
   }
@@ -369,7 +380,11 @@ export default function PainterApp() {
         </motion.div>
       </main>
 
-      <ShiftCorrectionDialog open={correctionOpen} onOpenChange={setCorrectionOpen} />
+      <ShiftCorrectionDialog
+        open={correctionOpen}
+        onOpenChange={setCorrectionOpen}
+        defaultTab={correctionDefaultTab}
+      />
     </div>
   );
 }
