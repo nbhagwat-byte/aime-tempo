@@ -29,17 +29,26 @@ import {
   saveTimeLog,
   calculateHours,
 } from '@/app/utils/dataManager';
+import { useEffect } from 'react';
 import { isToday, format } from 'date-fns';
 
 interface ShiftCorrectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** When opening, which tab to show. Used e.g. from calendar when "Add Missing Shift" is clicked. */
+  defaultTab?: 'propose' | 'missing';
 }
 
-export function ShiftCorrectionDialog({ open, onOpenChange }: ShiftCorrectionDialogProps) {
+export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propose' }: ShiftCorrectionDialogProps) {
   const { t } = useLanguage();
   const { currentUser } = useAuth();
-  const [mode, setMode] = useState<'propose' | 'missing'>('propose');
+  const [mode, setMode] = useState<'propose' | 'missing'>(defaultTab);
+
+  useEffect(() => {
+    if (open) {
+      setMode(defaultTab);
+    }
+  }, [open, defaultTab]);
   const [selectedLogId, setSelectedLogId] = useState('');
   const [correctionType, setCorrectionType] = useState<'check_in' | 'check_out'>('check_in');
   const [requestedTime, setRequestedTime] = useState('');
