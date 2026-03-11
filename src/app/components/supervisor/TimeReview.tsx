@@ -95,7 +95,7 @@ export function TimeReview() {
           <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
         </div>
         <Select value={projectFilter} onValueChange={setProjectFilter}>
-          <SelectTrigger className="w-48"><SelectValue placeholder="Project" /></SelectTrigger>
+          <SelectTrigger className="w-48"><SelectValue placeholder={t('supervisor.filterProject')} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
             {projects.map((p) => (
@@ -104,7 +104,7 @@ export function TimeReview() {
           </SelectContent>
         </Select>
         <Select value={painterFilter} onValueChange={setPainterFilter}>
-          <SelectTrigger className="w-48"><SelectValue placeholder="Painter" /></SelectTrigger>
+          <SelectTrigger className="w-48"><SelectValue placeholder={t('supervisor.filterPainter')} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
             {users.filter((u) => u.role === 'painter').map((u) => (
@@ -113,7 +113,7 @@ export function TimeReview() {
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-40"><SelectValue placeholder={t('supervisor.filterStatus')} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
             <SelectItem value="completed">{t('painter.completed')}</SelectItem>
