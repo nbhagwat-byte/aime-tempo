@@ -75,7 +75,7 @@ export function TeamManagement() {
       id,
       name: name.trim(),
       email: email.trim(),
-      password: password || editingUser?.password ?? '',
+      password: password || (editingUser?.password ?? ''),
       role,
       hourlyRate: parseFloat(hourlyRate) || 0,
       language,
@@ -213,3 +213,4 @@ export function TeamManagement() {
     </div>
   );
 }
+
