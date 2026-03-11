@@ -12,12 +12,15 @@ import {
   startOfWeek,
   endOfWeek,
   parseISO,
+  subDays,
 } from 'date-fns';
 import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, DollarSign } from 'lucide-react';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { getUserTimeLogs, getProjects, calculateHours } from '@/app/utils/dataManager';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent } from '@/app/components/ui/card';
+import { Input } from '@/app/components/ui/input';
+import { Label } from '@/app/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -26,32 +29,26 @@ import {
   SelectValue,
 } from '@/app/components/ui/select';
 
-// Pay period: bi-weekly (e.g. Feb 26 - Mar 11)
-function getPayPeriods() {
-  const periods: { label: string; start: Date; end: Date }[] = [];
-  const now = new Date();
-  for (let i = -2; i <= 2; i++) {
-    const base = new Date(now.getFullYear(), now.getMonth(), 1);
-    const start = new Date(base);
-    start.setDate(1);
-    if (start.getDay() !== 0) {
-      start.setDate(1 - start.getDay());
-    }
-    start.setDate(start.getDate() + i * 14);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 13);
-    const label = i === 0 ? 'Current Period' : format(start, 'MMM d') + ' - ' + format(end, 'MMM d');
-    periods.push({ label, start, end });
-  }
-  return periods;
+// Bi-weekly pay period from a given date
+function getPayPeriodForDate(date: Date): { start: Date; end: Date } {
+  const jan1 = new Date(date.getFullYear(), 0, 1);
+  const days = Math.floor((date.getTime() - jan1.getTime()) / (24 * 60 * 60 * 1000));
+  const periodStart = new Date(jan1);
+  periodStart.setDate(periodStart.getDate() + Math.floor(days / 14) * 14);
+  const periodEnd = new Date(periodStart);
+  periodEnd.setDate(periodEnd.getDate() + 13);
+  return { start: periodStart, end: periodEnd };
 }
 
 function getCurrentPayPeriod() {
+  return getPayPeriodForDate(new Date());
+}
+
+function getLastPayPeriod() {
   const now = new Date();
-  const jan1 = new Date(now.getFullYear(), 0, 1);
-  const days = Math.floor((now.getTime() - jan1.getTime()) / (24 * 60 * 60 * 1000));
-  const periodStart = new Date(jan1);
-  periodStart.setDate(periodStart.getDate() + Math.floor(days / 14) * 14);
+  const current = getPayPeriodForDate(now);
+  const periodStart = new Date(current.start);
+  periodStart.setDate(periodStart.getDate() - 14);
   const periodEnd = new Date(periodStart);
   periodEnd.setDate(periodEnd.getDate() + 13);
   return { start: periodStart, end: periodEnd };
@@ -73,11 +70,22 @@ export function PainterCalendarView({
   onProposeCorrection,
 }: PainterCalendarViewProps) {
   const { t } = useLanguage();
-  const [month, setMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [periodKey, setPeriodKey] = useState('current');
+  const now = new Date();
+  const [month, setMonth] = useState(now);
+  const [selectedDate, setSelectedDate] = useState<Date>(now);
+  const [periodKey, setPeriodKey] = useState<'current' | 'last' | 'custom'>('current');
+  const [customStart, setCustomStart] = useState(format(subDays(now, 13), 'yyyy-MM-dd'));
+  const [customEnd, setCustomEnd] = useState(format(now, 'yyyy-MM-dd'));
 
-  const payPeriod = getCurrentPayPeriod();
+  const payPeriod = useMemo(() => {
+    if (periodKey === 'current') return getCurrentPayPeriod();
+    if (periodKey === 'last') return getLastPayPeriod();
+    return {
+      start: new Date(customStart),
+      end: new Date(customEnd),
+    };
+  }, [periodKey, customStart, customEnd]);
+
   const projects = getProjects().filter((p) => p.active);
 
   const logs = useMemo(() => getUserTimeLogs(userId), [userId]);
@@ -146,14 +154,36 @@ export function PainterCalendarView({
               <DollarSign className="h-5 w-5 text-[#F0C908]" />
               <span className="font-semibold">{t('painter.payPeriodSummary')}</span>
             </div>
-            <Select value={periodKey} onValueChange={setPeriodKey}>
+            <Select value={periodKey} onValueChange={(v) => setPeriodKey(v as 'current' | 'last' | 'custom')}>
               <SelectTrigger className="mb-2">
                 <SelectValue placeholder={t('painter.currentPeriod')} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="current">{t('painter.currentPeriod')}</SelectItem>
+                <SelectItem value="last">{t('painter.lastPeriod')}</SelectItem>
+                <SelectItem value="custom">{t('painter.customDates')}</SelectItem>
               </SelectContent>
             </Select>
+            {periodKey === 'custom' && (
+              <div className="mb-4 grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">{t('painter.startDate')}</Label>
+                  <Input
+                    type="date"
+                    value={customStart}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">{t('painter.endDate')}</Label>
+                  <Input
+                    type="date"
+                    value={customEnd}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
             <p className="mb-4 flex items-center gap-2 text-sm text-gray-500">
               <CalendarIcon className="h-4 w-4" />
               {format(payPeriod.start, 'MMM d')} - {format(payPeriod.end, 'MMM d, yyyy')}
@@ -214,8 +244,12 @@ export function PainterCalendarView({
                     onClick={() => setSelectedDate(day)}
                     className={`flex flex-col items-center rounded-lg p-2 text-sm transition-colors ${
                       !inMonth ? 'text-gray-300' : 'text-[#062644]'
-                    } ${selected ? 'bg-[#F0C908] font-semibold text-[#062644]' : ''} ${
-                      today && !selected ? 'ring-2 ring-[#236B8E]' : ''
+                    } ${
+                      today && !selected
+                        ? 'bg-[#F0C908] font-semibold text-[#062644]'
+                        : selected
+                          ? 'bg-[#236B8E]/30 ring-2 ring-[#236B8E] font-semibold text-[#062644]'
+                          : ''
                     } hover:bg-[#236B8E]/10`}
                   >
                     <span>{format(day, 'd')}</span>
