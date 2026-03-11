@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -29,17 +29,23 @@ import {
   saveTimeLog,
   calculateHours,
 } from '@/app/utils/dataManager';
-import { useEffect } from 'react';
-import { isToday, format } from 'date-fns';
+import { isSameDay, format, parseISO } from 'date-fns';
 
 interface ShiftCorrectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** When opening, which tab to show. Used e.g. from calendar when "Add Missing Shift" is clicked. */
   defaultTab?: 'propose' | 'missing';
+  /** When set (e.g. from calendar), user only picks time; date is fixed. Show "Submitting for: [date]" and use time inputs. */
+  contextDate?: Date | null;
 }
 
-export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propose' }: ShiftCorrectionDialogProps) {
+export function ShiftCorrectionDialog({
+  open,
+  onOpenChange,
+  defaultTab = 'propose',
+  contextDate = null,
+}: ShiftCorrectionDialogProps) {
   const { t } = useLanguage();
   const { currentUser } = useAuth();
   const [mode, setMode] = useState<'propose' | 'missing'>(defaultTab);
@@ -59,11 +65,16 @@ export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propos
   const [newProjectName, setNewProjectName] = useState('');
 
   const projects = getProjects().filter((p) => p.active);
-  const todayLogs = currentUser
-    ? getUserTimeLogs(currentUser.id).filter(
-        (l) => l.checkOut && isToday(new Date(l.checkIn))
-      )
-    : [];
+  const allUserLogs = useMemo(
+    () => (currentUser ? getUserTimeLogs(currentUser.id) : []),
+    [currentUser]
+  );
+  const todayLogs = useMemo(() => {
+    const refDate = contextDate ?? new Date();
+    return allUserLogs.filter(
+      (l) => l.checkOut && isSameDay(parseISO(l.checkIn), refDate)
+    );
+  }, [allUserLogs, contextDate]);
   const projectOptions = useMemo(
     () => [
       ...projects.map((p) => ({ id: p.id, name: p.name })),
@@ -79,7 +90,11 @@ export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propos
     e.preventDefault();
     if (!selectedLog || !reason.trim() || reason.trim().length < 10 || !currentUser) return;
     const origTime = correctionType === 'check_in' ? selectedLog.checkIn : selectedLog.checkOut!;
-    const reqTime = requestedTime || origTime;
+    let reqTime = requestedTime || origTime;
+    if (contextDate && selectedLog && requestedTime && requestedTime.length <= 5) {
+      const refDate = new Date(selectedLog.checkIn);
+      reqTime = `${format(refDate, 'yyyy-MM-dd')}T${requestedTime}:00.000`;
+    }
     const correction = {
       id: `corr-${Date.now()}`,
       timeLogId: selectedLog.id,
@@ -113,8 +128,15 @@ export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propos
       // For demo we don't create project; we store in reason that it's new project
     }
     const logId = `log-${Date.now()}`;
-    const checkIn = checkInTime || new Date().toISOString();
-    const checkOut = checkOutTime || new Date().toISOString();
+    const baseDate = contextDate ?? new Date();
+    const checkIn =
+      contextDate && checkInTime
+        ? `${format(baseDate, 'yyyy-MM-dd')}T${checkInTime}:00.000`
+        : checkInTime || new Date().toISOString();
+    const checkOut =
+      contextDate && checkOutTime
+        ? `${format(baseDate, 'yyyy-MM-dd')}T${checkOutTime}:00.000`
+        : checkOutTime || new Date().toISOString();
     if (new Date(checkOut) <= new Date(checkIn)) {
       toast.error('Check-out must be after check-in');
       return;
@@ -204,6 +226,11 @@ export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propos
                     })}
                   </SelectContent>
                 </Select>
+                {contextDate && (
+                  <p className="mt-2 text-sm font-medium text-[#236B8E]">
+                    {t('painter.submittingFor')}: {format(contextDate, 'MMMM d, yyyy')}
+                  </p>
+                )}
               </div>
               {selectedLog && (
                 <>
@@ -233,8 +260,20 @@ export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propos
                   <div>
                     <Label>{t('painter.requestedTime')}</Label>
                     <Input
-                      type="datetime-local"
-                      value={requestedTime}
+                      type={contextDate ? 'time' : 'datetime-local'}
+                      value={
+                        contextDate
+                          ? requestedTime ||
+                            (selectedLog
+                              ? format(
+                                  new Date(
+                                    correctionType === 'check_in' ? selectedLog.checkIn : selectedLog.checkOut!
+                                  ),
+                                  'HH:mm'
+                                )
+                              : '')
+                          : requestedTime
+                      }
                       onChange={(e) => setRequestedTime(e.target.value)}
                     />
                     <p className="text-xs text-gray-500">
@@ -283,6 +322,11 @@ export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propos
                     ))}
                   </SelectContent>
                 </Select>
+                {contextDate && (
+                  <p className="mt-2 text-sm font-medium text-[#236B8E]">
+                    {t('painter.submittingFor')}: {format(contextDate, 'MMMM d, yyyy')}
+                  </p>
+                )}
               </div>
               {projectId === '__new__' && (
                 <div>
@@ -298,7 +342,7 @@ export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propos
               <div>
                 <Label>{t('painter.checkInTime')}</Label>
                 <Input
-                  type="datetime-local"
+                  type={contextDate ? 'time' : 'datetime-local'}
                   value={checkInTime}
                   onChange={(e) => setCheckInTime(e.target.value)}
                   required
@@ -307,7 +351,7 @@ export function ShiftCorrectionDialog({ open, onOpenChange, defaultTab = 'propos
               <div>
                 <Label>{t('painter.checkOutTime')}</Label>
                 <Input
-                  type="datetime-local"
+                  type={contextDate ? 'time' : 'datetime-local'}
                   value={checkOutTime}
                   onChange={(e) => setCheckOutTime(e.target.value)}
                   required
