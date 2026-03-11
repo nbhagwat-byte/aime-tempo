@@ -16,7 +16,7 @@ import {
 } from 'date-fns';
 import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, DollarSign } from 'lucide-react';
 import { useLanguage } from '@/app/contexts/LanguageContext';
-import { getUserTimeLogs, getProjects, calculateHours } from '@/app/utils/dataManager';
+import { getUserTimeLogs, getProjects, getTimeCorrections, calculateHours } from '@/app/utils/dataManager';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent } from '@/app/components/ui/card';
 import { Input } from '@/app/components/ui/input';
@@ -58,8 +58,8 @@ interface PainterCalendarViewProps {
   userId: string;
   hourlyRate: number;
   onBack: () => void;
-  onAddMissingShift: () => void;
-  onProposeCorrection: () => void;
+  onAddMissingShift: (selectedDate: Date) => void;
+  onProposeCorrection: (selectedDate: Date) => void;
 }
 
 export function PainterCalendarView({
@@ -109,10 +109,19 @@ export function PainterCalendarView({
         (l) =>
           l.checkIn &&
           isSameDay(parseISO(l.checkIn), selectedDate) &&
-          (l.checkOut || l.status === 'active')
+          (l.checkOut || l.status === 'active' || l.status === 'pending_review')
       ),
     [logs, selectedDate]
   );
+  const corrections = getTimeCorrections();
+  const getLogStatus = (log: { id: string; status: string }) => {
+    const hasPendingCorrection = corrections.some(
+      (c) => c.timeLogId === log.id && c.status === 'pending'
+    );
+    if (hasPendingCorrection) return 'pending';
+    if (log.status === 'pending_review') return 'pending_review';
+    return 'approved';
+  };
   const selectedDayHours = selectedDayLogs.reduce(
     (s, l) => s + (l.checkOut ? calculateHours(l.checkIn, l.checkOut) : 0),
     0
@@ -271,13 +280,21 @@ export function PainterCalendarView({
               <div className="space-y-3">
                 {selectedDayLogs.map((log) => {
                   const hours = log.checkOut ? calculateHours(log.checkIn, log.checkOut) : 0;
+                  const status = getLogStatus(log);
                   return (
                     <div
                       key={log.id}
                       className="flex items-start gap-3 border-l-4 border-[#062644] pl-3"
                     >
                       <div className="flex-1">
-                        <p className="font-medium text-[#062644]">{projectName(log.projectId)}</p>
+                        <p className="font-medium text-[#062644]">
+                          {projectName(log.projectId)}
+                          <span className="ml-2 text-xs font-normal text-gray-500">
+                            {status === 'pending' && `(${t('painter.pending')})`}
+                            {status === 'pending_review' && `(${t('painter.pendingReview')})`}
+                            {status === 'approved' && `(${t('painter.approved')})`}
+                          </span>
+                        </p>
                         <p className="text-sm text-gray-500">
                           {format(new Date(log.checkIn), 'h:mm a')} -{' '}
                           {log.checkOut ? format(new Date(log.checkOut), 'h:mm a') : '—'}
@@ -297,7 +314,11 @@ export function PainterCalendarView({
             )}
             <Button
               className="mt-4 w-full gap-2 bg-[#236B8E] hover:bg-[#062644]"
-              onClick={selectedDayLogs.length > 0 ? onProposeCorrection : onAddMissingShift}
+              onClick={() =>
+                selectedDayLogs.length > 0
+                  ? onProposeCorrection(selectedDate)
+                  : onAddMissingShift(selectedDate)
+              }
             >
               <Clock className="h-4 w-4" />
               {selectedDayLogs.length > 0 ? t('painter.proposeCorrection') : t('painter.addMissingShift')}
