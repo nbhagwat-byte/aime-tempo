@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/ta
 import { Badge } from '@/app/components/ui/badge';
 import { ProjectManagement } from '@/app/components/supervisor/ProjectManagement';
 import { TeamManagement } from '@/app/components/supervisor/TeamManagement';
-import { TimeReview } from '@/app/components/supervisor/TimeLogs';
+import { TimeReview } from '@/app/components/supervisor/TimeReview';
 import { PayrollExport } from '@/app/components/supervisor/PayrollExport';
 import { PendingProjectsQueue } from '@/app/components/supervisor/PendingProjectsQueue';
 
@@ -94,4 +94,5 @@ export default function SupervisorDashboard() {
     </div>
   );
 }
+
 
