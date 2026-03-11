@@ -50,6 +50,7 @@ export default function PainterApp() {
   const [requestProjectOpen, setRequestProjectOpen] = useState(false);
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionDefaultTab, setCorrectionDefaultTab] = useState<'propose' | 'missing'>('propose');
+  const [correctionContextDate, setCorrectionContextDate] = useState<Date | null>(null);
   const [view, setView] = useState<'landing' | 'calendar'>('landing');
 
   const projects = getProjects().filter((p) => p.active);
@@ -168,19 +169,25 @@ export default function PainterApp() {
           userId={currentUser.id}
           hourlyRate={currentUser.hourlyRate}
           onBack={() => setView('landing')}
-          onAddMissingShift={() => {
+          onAddMissingShift={(selectedDate) => {
+            setCorrectionContextDate(selectedDate);
             setCorrectionDefaultTab('missing');
             setCorrectionOpen(true);
           }}
-          onProposeCorrection={() => {
+          onProposeCorrection={(selectedDate) => {
+            setCorrectionContextDate(selectedDate);
             setCorrectionDefaultTab('propose');
             setCorrectionOpen(true);
           }}
         />
         <ShiftCorrectionDialog
           open={correctionOpen}
-          onOpenChange={setCorrectionOpen}
+          onOpenChange={(open) => {
+            setCorrectionOpen(open);
+            if (!open) setCorrectionContextDate(null);
+          }}
           defaultTab={correctionDefaultTab}
+          contextDate={correctionContextDate}
         />
       </>
     );
@@ -222,7 +229,12 @@ export default function PainterApp() {
       </header>
 
       <main className="mx-auto max-w-lg space-y-4 p-4">
-        <WorkNotificationBanner onOpenCorrection={() => setCorrectionOpen(true)} />
+        <WorkNotificationBanner
+          onOpenCorrection={() => {
+            setCorrectionContextDate(null);
+            setCorrectionOpen(true);
+          }}
+        />
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -382,8 +394,12 @@ export default function PainterApp() {
 
       <ShiftCorrectionDialog
         open={correctionOpen}
-        onOpenChange={setCorrectionOpen}
+        onOpenChange={(open) => {
+          setCorrectionOpen(open);
+          if (!open) setCorrectionContextDate(null);
+        }}
         defaultTab={correctionDefaultTab}
+        contextDate={correctionContextDate}
       />
     </div>
   );
