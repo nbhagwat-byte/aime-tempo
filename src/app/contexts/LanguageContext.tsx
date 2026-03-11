@@ -65,6 +65,10 @@ const translations: Translations = {
   'painter.shifts': { en: 'shifts', es: 'turnos' },
   'painter.noTimeEntries': { en: 'No time entries for this date', es: 'No hay registros de tiempo para esta fecha' },
   'painter.total': { en: 'Total', es: 'Total' },
+  'painter.lastPeriod': { en: 'Last Period', es: 'Período Anterior' },
+  'painter.customDates': { en: 'Custom Dates', es: 'Fechas Personalizadas' },
+  'painter.startDate': { en: 'Start Date', es: 'Fecha de Inicio' },
+  'painter.endDate': { en: 'End Date', es: 'Fecha de Fin' },
 
   'supervisor.projects': { en: 'Projects', es: 'Proyectos' },
   'supervisor.team': { en: 'Team', es: 'Equipo' },
