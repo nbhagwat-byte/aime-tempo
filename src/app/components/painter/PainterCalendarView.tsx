@@ -13,6 +13,10 @@ import {
   endOfWeek,
   parseISO,
   subDays,
+  setHours,
+  setMinutes,
+  setSeconds,
+  setMilliseconds,
 } from 'date-fns';
 import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, DollarSign } from 'lucide-react';
 import { useLanguage } from '@/app/contexts/LanguageContext';
@@ -29,15 +33,13 @@ import {
   SelectValue,
 } from '@/app/components/ui/select';
 
-// Bi-weekly pay period from a given date
+// Week: Monday 00:01 AM to Sunday 11:59 PM
 function getPayPeriodForDate(date: Date): { start: Date; end: Date } {
-  const jan1 = new Date(date.getFullYear(), 0, 1);
-  const days = Math.floor((date.getTime() - jan1.getTime()) / (24 * 60 * 60 * 1000));
-  const periodStart = new Date(jan1);
-  periodStart.setDate(periodStart.getDate() + Math.floor(days / 14) * 14);
-  const periodEnd = new Date(periodStart);
-  periodEnd.setDate(periodEnd.getDate() + 13);
-  return { start: periodStart, end: periodEnd };
+  const start = startOfWeek(date, { weekStartsOn: 1 });
+  const startWithTime = setMilliseconds(setSeconds(setMinutes(setHours(start, 0), 1), 0), 0);
+  const end = endOfWeek(date, { weekStartsOn: 1 });
+  const endWithTime = setMilliseconds(setSeconds(setMinutes(setHours(end, 23), 59), 59), 999);
+  return { start: startWithTime, end: endWithTime };
 }
 
 function getCurrentPayPeriod() {
@@ -46,12 +48,8 @@ function getCurrentPayPeriod() {
 
 function getLastPayPeriod() {
   const now = new Date();
-  const current = getPayPeriodForDate(now);
-  const periodStart = new Date(current.start);
-  periodStart.setDate(periodStart.getDate() - 14);
-  const periodEnd = new Date(periodStart);
-  periodEnd.setDate(periodEnd.getDate() + 13);
-  return { start: periodStart, end: periodEnd };
+  const lastWeek = subDays(now, 7);
+  return getPayPeriodForDate(lastWeek);
 }
 
 interface PainterCalendarViewProps {
@@ -114,13 +112,23 @@ export function PainterCalendarView({
     [logs, selectedDate]
   );
   const corrections = getTimeCorrections();
-  const getLogStatus = (log: { id: string; status: string }) => {
-    const hasPendingCorrection = corrections.some(
+  const getLogStatus = (
+    log: { id: string; status: string }
+  ): { status: 'pending' | 'pending_review' | 'approved' | 'denied'; denialReason?: string } => {
+    const pendingCorrection = corrections.find(
       (c) => c.timeLogId === log.id && c.status === 'pending'
     );
-    if (hasPendingCorrection) return 'pending';
-    if (log.status === 'pending_review') return 'pending_review';
-    return 'approved';
+    if (pendingCorrection) return { status: 'pending' };
+    const deniedCorrection = corrections.find(
+      (c) => c.timeLogId === log.id && c.status === 'denied'
+    );
+    if (deniedCorrection)
+      return {
+        status: 'denied',
+        denialReason: deniedCorrection.denialReason ?? '',
+      };
+    if (log.status === 'pending_review') return { status: 'pending_review' };
+    return { status: 'approved' };
   };
   const selectedDayHours = selectedDayLogs.reduce(
     (s, l) => s + (l.checkOut ? calculateHours(l.checkIn, l.checkOut) : 0),
@@ -280,30 +288,48 @@ export function PainterCalendarView({
               <div className="space-y-3">
                 {selectedDayLogs.map((log) => {
                   const hours = log.checkOut ? calculateHours(log.checkIn, log.checkOut) : 0;
-                  const status = getLogStatus(log);
+                  const statusInfo = getLogStatus(log);
                   return (
                     <div
                       key={log.id}
-                      className="flex items-start gap-3 border-l-4 border-[#062644] pl-3"
+                      className="flex flex-col gap-2 border-l-4 border-[#062644] pl-3"
                     >
-                      <div className="flex-1">
-                        <p className="font-medium text-[#062644]">
-                          {projectName(log.projectId)}
-                          <span className="ml-2 text-xs font-normal text-gray-500">
-                            {status === 'pending' && `(${t('painter.pending')})`}
-                            {status === 'pending_review' && `(${t('painter.pendingReview')})`}
-                            {status === 'approved' && `(${t('painter.approved')})`}
-                          </span>
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {format(new Date(log.checkIn), 'h:mm a')} -{' '}
-                          {log.checkOut ? format(new Date(log.checkOut), 'h:mm a') : '—'}
-                        </p>
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1">
+                          <p className="font-medium text-[#062644]">
+                            {projectName(log.projectId)}
+                            <span className="ml-2 text-xs font-normal text-gray-500">
+                              {statusInfo.status === 'pending' && `(${t('painter.pending')})`}
+                              {statusInfo.status === 'pending_review' && `(${t('painter.pendingReview')})`}
+                              {statusInfo.status === 'approved' && `(${t('painter.approved')})`}
+                              {statusInfo.status === 'denied' && `(${t('painter.denied')})`}
+                            </span>
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {format(new Date(log.checkIn), 'h:mm a')} -{' '}
+                            {log.checkOut ? format(new Date(log.checkOut), 'h:mm a') : '—'}
+                          </p>
+                          {statusInfo.status === 'denied' && statusInfo.denialReason && (
+                            <p className="mt-1 text-xs text-[#D10000]">
+                              {t('painter.denialReason')}: {statusInfo.denialReason}
+                            </p>
+                          )}
+                        </div>
+                        <span className="flex items-center gap-1 rounded bg-[#062644] px-2 py-0.5 text-xs text-white">
+                          <Clock className="h-3 w-3" />
+                          {hours.toFixed(2)}h
+                        </span>
                       </div>
-                      <span className="flex items-center gap-1 rounded bg-[#062644] px-2 py-0.5 text-xs text-white">
-                        <Clock className="h-3 w-3" />
-                        {hours.toFixed(2)}h
-                      </span>
+                      {statusInfo.status === 'denied' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-fit"
+                          onClick={() => onProposeCorrection(selectedDate)}
+                        >
+                          {t('painter.resubmit')}
+                        </Button>
+                      )}
                     </div>
                   );
                 })}
