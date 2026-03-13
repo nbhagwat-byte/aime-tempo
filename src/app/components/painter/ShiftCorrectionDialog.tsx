@@ -22,7 +22,7 @@ import {
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useAuth } from '@/app/contexts/AuthContext';
 import {
-  getProjects,
+  getProjectsForPainter,
   getTimeLogs,
   getUserTimeLogs,
   saveTimeCorrection,
@@ -64,7 +64,7 @@ export function ShiftCorrectionDialog({
   const [checkOutTime, setCheckOutTime] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
 
-  const projects = getProjects().filter((p) => p.active);
+  const projects = getProjectsForPainter();
   const allUserLogs = useMemo(
     () => (currentUser ? getUserTimeLogs(currentUser.id) : []),
     [currentUser]
