@@ -149,6 +149,7 @@ export function ProjectManagement() {
       radius,
       active: true,
       notes: notes.trim() || undefined,
+      projectStatus: editingProject?.projectStatus ?? 'in_progress',
     };
     saveProject(project);
     toast.success('Project saved');
@@ -171,6 +172,7 @@ export function ProjectManagement() {
       location: { lat: 40.7128, lng: -74.006 },
       radius: pending.radius,
       active: true,
+      projectStatus: 'in_progress',
     };
     saveProject(newProject);
     deletePendingProject(pendingId);
@@ -291,7 +293,26 @@ export function ProjectManagement() {
                 <p className="mt-1 text-xs text-gray-500">
                   <MapPin className="inline h-3 w-3" /> {p.radius}m radius
                 </p>
-                <Badge variant="success" className="mt-2">Active</Badge>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Badge variant={p.projectStatus === 'complete' ? 'secondary' : 'success'}>
+                    {p.projectStatus === 'complete' ? 'Complete' : 'In Progress'}
+                  </Badge>
+                  <Select
+                    value={p.projectStatus ?? 'in_progress'}
+                    onValueChange={(value: 'in_progress' | 'complete') => {
+                      saveProject({ ...p, projectStatus: value });
+                      toast.success(value === 'complete' ? 'Project marked complete' : 'Project set to in progress');
+                    }}
+                  >
+                    <SelectTrigger className="w-[140px] h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="complete">Complete</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardContent>
             </Card>
           ))}
