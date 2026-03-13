@@ -50,6 +50,7 @@ function getMockProjects(): Project[] {
       location: { lat: 40.7484, lng: -73.9857 },
       radius: 150,
       active: true,
+      projectStatus: 'in_progress',
     },
     {
       id: 'proj-2',
@@ -58,6 +59,7 @@ function getMockProjects(): Project[] {
       location: { lat: 40.6953, lng: -73.9896 },
       radius: 100,
       active: true,
+      projectStatus: 'in_progress',
     },
     {
       id: 'proj-3',
@@ -66,6 +68,7 @@ function getMockProjects(): Project[] {
       location: { lat: 40.7424, lng: -73.9376 },
       radius: 200,
       active: true,
+      projectStatus: 'in_progress',
     },
     {
       id: 'proj-4',
@@ -74,6 +77,7 @@ function getMockProjects(): Project[] {
       location: { lat: 40.8236, lng: -73.9236 },
       radius: 120,
       active: true,
+      projectStatus: 'in_progress',
     },
     {
       id: 'proj-5',
@@ -82,6 +86,7 @@ function getMockProjects(): Project[] {
       location: { lat: 40.5834, lng: -74.1596 },
       radius: 180,
       active: true,
+      projectStatus: 'in_progress',
     },
   ];
 }
@@ -147,6 +152,13 @@ export function getProjects(): Project[] {
   initializeMockData();
   const raw = localStorage.getItem(PROJECTS_KEY);
   return raw ? JSON.parse(raw) : [];
+}
+
+/** Projects visible in painter app dropdown (active and in progress only; completed are hidden). */
+export function getProjectsForPainter(): Project[] {
+  return getProjects().filter(
+    (p) => p.active && p.projectStatus !== 'complete'
+  );
 }
 
 export function saveProject(project: Project): void {
