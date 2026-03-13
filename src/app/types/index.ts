@@ -20,6 +20,8 @@ export interface Project {
   active: boolean;
   isPending?: boolean;
   notes?: string;
+  /** Project lifecycle: in_progress (default) or complete. Completed projects are hidden from painter check-in dropdown. */
+  projectStatus?: 'in_progress' | 'complete';
 }
 
 export interface TimeLog {
