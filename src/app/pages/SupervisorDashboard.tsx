@@ -58,7 +58,7 @@ export default function SupervisorDashboard() {
             </TabsTrigger>
             <TabsTrigger value="time" className="gap-1">
               <Clock className="h-4 w-4" />
-              {t('supervisor.timeLogs')}
+              Time Logs
             </TabsTrigger>
             <TabsTrigger value="payroll" className="gap-1">
               <DollarSign className="h-4 w-4" />
@@ -94,7 +94,3 @@ export default function SupervisorDashboard() {
     </div>
   );
 }
-
-
-
-
