@@ -6,6 +6,7 @@ import { useAuth } from '@/app/contexts/AuthContext';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import {
   getProjects,
+  getProjectsForPainter,
   getPendingProjects,
   getActiveTimeLog,
   getMockLocation,
@@ -53,7 +54,7 @@ export default function PainterApp() {
   const [correctionContextDate, setCorrectionContextDate] = useState<Date | null>(null);
   const [view, setView] = useState<'landing' | 'calendar'>('landing');
 
-  const projects = getProjects().filter((p) => p.active);
+  const projects = getProjectsForPainter();
   const pendingProjects = getPendingProjects().filter((p) => p.status === 'pending');
   const allOptions = [
     ...projects.map((p) => ({ ...p, isPending: false })),
