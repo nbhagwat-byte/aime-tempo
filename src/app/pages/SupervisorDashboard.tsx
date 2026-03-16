@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Briefcase, Clock, DollarSign, LogOut, Users } from 'lucide-react';
 import { useAuth } from '@/app/contexts/AuthContext';
@@ -14,13 +14,29 @@ import { PayrollExport } from '@/app/components/supervisor/PayrollExport';
 import { PendingProjectsQueue } from '@/app/components/supervisor/PendingProjectsQueue';
 
 export default function SupervisorDashboard() {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, signOut } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const navigate = useNavigate();
-  const pendingCount = getTimeCorrections().filter((c) => c.status === 'pending').length;
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const corrections = await getTimeCorrections();
+        if (!active) return;
+        setPendingCount(corrections.filter((c) => c.status === 'pending').length);
+      } catch {
+        // Non-blocking
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleLogout = () => {
-    logout();
+    void signOut();
     navigate('/', { replace: true });
   };
 
