@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Briefcase, List, MapPin, Pencil, Plus, Trash2, Users, Clock, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLanguage } from '@/app/contexts/LanguageContext';
@@ -14,7 +14,7 @@ import {
   geocodeAddress,
   calculateHours,
 } from '@/app/utils/dataManager';
-import type { Project } from '@/app/types';
+import type { Project, PendingProject, User } from '@/app/types';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import {
@@ -56,11 +56,35 @@ export function ProjectManagement() {
   const [radius, setRadius] = useState(100);
   const [notes, setNotes] = useState('');
   const [geocoding, setGeocoding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [pendingProjects, setPendingProjects] = useState<PendingProject[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [timeLogs, setTimeLogs] = useState<Awaited<ReturnType<typeof getTimeLogs>>>([]);
 
-  const projects = getProjects().filter((p) => !p.isPending);
-  const pendingProjects = getPendingProjects().filter((p) => p.status === 'pending');
-  const users = getUsers();
-  const timeLogs = getTimeLogs();
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const [projs, pending, team, logs] = await Promise.all([
+        getProjects(),
+        getPendingProjects(),
+        getUsers(),
+        getTimeLogs(),
+      ]);
+      setProjects(projs.filter((p) => !p.isPending));
+      setPendingProjects(pending.filter((p) => p.status === 'pending'));
+      setUsers(team);
+      setTimeLogs(logs);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
 
   const filteredProjects =
     projectFilter === 'all' ? projects : projects.filter((p) => p.id === projectFilter);
@@ -125,7 +149,7 @@ export function ProjectManagement() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const latNum = parseFloat(lat);
     const lngNum = parseFloat(lng);
     if (!name.trim()) {
@@ -140,7 +164,7 @@ export function ProjectManagement() {
       toast.error('Valid lat/lng required');
       return;
     }
-    const id = editingProject?.id ?? `proj-${Date.now()}`;
+    const id = editingProject?.id ?? crypto.randomUUID();
     const project: Project = {
       id,
       name: name.trim(),
@@ -151,22 +175,32 @@ export function ProjectManagement() {
       notes: notes.trim() || undefined,
       projectStatus: editingProject?.projectStatus ?? 'in_progress',
     };
-    saveProject(project);
-    toast.success('Project saved');
-    setDialogOpen(false);
+    try {
+      await saveProject(project);
+      toast.success('Project saved');
+      setDialogOpen(false);
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save');
+    }
   };
 
-  const handleDelete = (p: Project) => {
+  const handleDelete = async (p: Project) => {
     if (!confirm(t('common.delete') + '?')) return;
-    deleteProject(p.id);
-    toast.success('Project removed');
+    try {
+      await deleteProject(p.id);
+      toast.success('Project removed');
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete');
+    }
   };
 
-  const handleApprovePending = (pendingId: string) => {
+  const handleApprovePending = async (pendingId: string) => {
     const pending = pendingProjects.find((x) => x.id === pendingId);
     if (!pending) return;
     const newProject: Project = {
-      id: `proj-${Date.now()}`,
+      id: crypto.randomUUID(),
       name: pending.name,
       address: pending.address,
       location: { lat: 40.7128, lng: -74.006 },
@@ -174,16 +208,26 @@ export function ProjectManagement() {
       active: true,
       projectStatus: 'in_progress',
     };
-    saveProject(newProject);
-    deletePendingProject(pendingId);
-    toast.success(t('supervisor.correctionApproved'));
+    try {
+      await saveProject(newProject);
+      await deletePendingProject(pendingId);
+      toast.success(t('supervisor.correctionApproved'));
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to approve');
+    }
   };
 
-  const handleDenyPending = (pendingId: string) => {
+  const handleDenyPending = async (pendingId: string) => {
     const pending = pendingProjects.find((x) => x.id === pendingId);
     if (!pending) return;
-    savePendingProject({ ...pending, status: 'denied' });
-    toast.success(t('supervisor.correctionDenied'));
+    try {
+      await savePendingProject({ ...pending, status: 'denied' });
+      toast.success(t('supervisor.correctionDenied'));
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to deny');
+    }
   };
 
   const defaultIcon = L.icon({
@@ -193,6 +237,8 @@ export function ProjectManagement() {
     iconSize: [25, 41],
     iconAnchor: [12, 41],
   });
+
+  if (loading) return null;
 
   return (
     <div className="space-y-6">
@@ -299,9 +345,14 @@ export function ProjectManagement() {
                   </Badge>
                   <Select
                     value={p.projectStatus ?? 'in_progress'}
-                    onValueChange={(value: 'in_progress' | 'complete') => {
-                      saveProject({ ...p, projectStatus: value });
-                      toast.success(value === 'complete' ? 'Project marked complete' : 'Project set to in progress');
+                    onValueChange={async (value: 'in_progress' | 'complete') => {
+                      try {
+                        await saveProject({ ...p, projectStatus: value });
+                        toast.success(value === 'complete' ? 'Project marked complete' : 'Project set to in progress');
+                        await refresh();
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : 'Failed to update');
+                      }
                     }}
                   >
                     <SelectTrigger className="w-[140px] h-8">
