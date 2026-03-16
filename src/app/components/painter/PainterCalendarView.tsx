@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   format,
   startOfMonth,
@@ -21,6 +21,9 @@ import {
 import { ArrowLeft, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, DollarSign } from 'lucide-react';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { getUserTimeLogs, getProjectsForPainter, getTimeCorrections, calculateHours } from '@/app/utils/dataManager';
+import type { Project } from '@/app/types';
+import type { TimeLog } from '@/app/types';
+import type { TimeCorrection } from '@/app/types';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent } from '@/app/components/ui/card';
 import { Input } from '@/app/components/ui/input';
@@ -84,9 +87,33 @@ export function PainterCalendarView({
     };
   }, [periodKey, customStart, customEnd]);
 
-  const projects = getProjectsForPainter();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [logs, setLogs] = useState<TimeLog[]>([]);
+  const [corrections, setCorrections] = useState<TimeCorrection[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const logs = useMemo(() => getUserTimeLogs(userId), [userId]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const [projs, userLogs, corrs] = await Promise.all([
+          getProjectsForPainter(),
+          getUserTimeLogs(userId),
+          getTimeCorrections(),
+        ]);
+        if (!cancelled) {
+          setProjects(projs);
+          setLogs(userLogs);
+          setCorrections(corrs);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
   const periodLogs = useMemo(() => {
     return logs.filter((l) => {
       const d = l.checkIn ? new Date(l.checkIn).getTime() : 0;
@@ -111,7 +138,7 @@ export function PainterCalendarView({
       ),
     [logs, selectedDate]
   );
-  const corrections = getTimeCorrections();
+
   const getLogStatus = (
     log: { id: string; status: string }
   ): { status: 'pending' | 'pending_review' | 'approved' | 'denied'; denialReason?: string } => {
@@ -152,6 +179,8 @@ export function PainterCalendarView({
   }, [logs]);
 
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
+
+  if (loading) return null;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#062644] to-[#236B8E]/30 pb-24">
