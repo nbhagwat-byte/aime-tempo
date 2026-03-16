@@ -5,11 +5,10 @@ import { Calendar, Home, LogOut, MapPin, Send } from 'lucide-react';
 import { useAuth } from '@/app/contexts/AuthContext';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import {
-  getProjects,
   getProjectsForPainter,
   getPendingProjects,
   getActiveTimeLog,
-  getMockLocation,
+  getCurrentLocation,
   saveTimeLog,
   roundToQuarterHour,
   isWithinGeofence,
@@ -41,21 +40,45 @@ function getMapsUrl(address: string, lat?: number, lng?: number): string {
 }
 
 export default function PainterApp() {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, signOut } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [activeLog, setActiveLog] = useState<TimeLog | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [pendingProjects, setPendingProjects] = useState<any[]>([]);
+  const [userLogs, setUserLogs] = useState<TimeLog[]>([]);
   const [requestProjectOpen, setRequestProjectOpen] = useState(false);
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionDefaultTab, setCorrectionDefaultTab] = useState<'propose' | 'missing'>('propose');
   const [correctionContextDate, setCorrectionContextDate] = useState<Date | null>(null);
   const [view, setView] = useState<'landing' | 'calendar'>('landing');
 
-  const projects = getProjectsForPainter();
-  const pendingProjects = getPendingProjects().filter((p) => p.status === 'pending');
+  const refreshData = async () => {
+    if (!currentUser) return;
+    setLoadingData(true);
+    try {
+      const [projs, pendings, logs, active] = await Promise.all([
+        getProjectsForPainter(),
+        getPendingProjects(),
+        getUserTimeLogs(currentUser.id),
+        getActiveTimeLog(currentUser.id),
+      ]);
+      setProjects(projs);
+      setPendingProjects(pendings.filter((p) => p.status === 'pending'));
+      setUserLogs(logs);
+      setActiveLog(active);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unable to load data';
+      toast.error(msg);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
   const allOptions = [
     ...projects.map((p) => ({ ...p, isPending: false })),
     ...pendingProjects.map((p) => ({ ...p, isPending: true, id: p.id, location: { lat: 0, lng: 0 }, active: true })),
@@ -63,7 +86,7 @@ export default function PainterApp() {
 
   useEffect(() => {
     if (!currentUser) return;
-    setActiveLog(getActiveTimeLog(currentUser.id));
+    refreshData();
   }, [currentUser]);
 
   useEffect(() => {
@@ -86,8 +109,8 @@ export default function PainterApp() {
     if (!proj) return;
     setLoading(true);
     try {
-      const loc = await getMockLocation();
-      const approvedProj = getProjects().find((p) => p.id === selectedProjectId);
+      const loc = await getCurrentLocation();
+      const approvedProj = projects.find((p) => p.id === selectedProjectId);
       const isPending = pendingProjects.some((p) => p.id === selectedProjectId);
       if (!isPending && approvedProj && !isWithinGeofence(loc, approvedProj.location, approvedProj.radius)) {
         toast.error(t('painter.outsideGeofence'));
@@ -98,7 +121,7 @@ export default function PainterApp() {
         return;
       }
       const log: TimeLog = {
-        id: `log-${Date.now()}`,
+        id: crypto.randomUUID(),
         userId: currentUser.id,
         projectId: selectedProjectId,
         checkIn: new Date().toISOString(),
@@ -106,9 +129,10 @@ export default function PainterApp() {
         status: 'active',
         syncStatus: 'pending',
       };
-      saveTimeLog(log);
+      await saveTimeLog(log);
       setActiveLog(log);
       toast.success(t('painter.checkedIn'));
+      await refreshData();
     } finally {
       setLoading(false);
     }
@@ -118,8 +142,8 @@ export default function PainterApp() {
     if (!activeLog) return;
     setLoading(true);
     try {
-      const loc = await getMockLocation();
-      const proj = getProjects().find((p) => p.id === activeLog.projectId);
+      const loc = await getCurrentLocation();
+      const proj = projects.find((p) => p.id === activeLog.projectId);
       if (proj && !isWithinGeofence(loc, proj.location, proj.radius)) {
         toast.error(t('painter.outsideGeofence'));
         return;
@@ -130,21 +154,25 @@ export default function PainterApp() {
         checkOut: roundedOut.toISOString(),
         status: 'completed',
       };
-      saveTimeLog(updated);
+      await saveTimeLog(updated);
       setActiveLog(null);
       setSelectedProjectId('');
       toast.success(t('painter.checkedOut'));
+      await refreshData();
     } finally {
       setLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/', { replace: true });
+  const handleLogout = async () => {
+    try {
+      await signOut();
+    } finally {
+      navigate('/', { replace: true });
+    }
   };
 
-  const todayLogs = getUserTimeLogs(currentUser.id).filter((l) => l.checkOut && isToday(new Date(l.checkIn)));
+  const todayLogs = userLogs.filter((l) => l.checkOut && isToday(new Date(l.checkIn)));
   const todayHours = todayLogs.reduce(
     (sum, l) => sum + (l.checkOut ? calculateHours(l.checkIn, l.checkOut) : 0),
     0
@@ -161,6 +189,8 @@ export default function PainterApp() {
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? pendingProjects.find((p) => p.id === selectedProjectId)
     : null;
+
+  if (loadingData) return null;
 
   // Calendar view
   if (view === 'calendar') {
@@ -201,7 +231,7 @@ export default function PainterApp() {
           <button type="button" className="rounded p-1 hover:bg-white/10" aria-label="Home">
             <Home className="h-5 w-5" />
           </button>
-          <button type="button" className="rounded p-1 hover:bg-white/10" aria-label="Refresh">
+          <button type="button" className="rounded p-1 hover:bg-white/10" aria-label="Refresh" onClick={() => void refreshData()}>
             <Send className="h-5 w-5 rotate-90" />
           </button>
         </div>
@@ -302,6 +332,7 @@ export default function PainterApp() {
                 onRequested={() => {
                   setRequestProjectOpen(false);
                   setSelectedProjectId('');
+                  void refreshData();
                 }}
               />
             </CardContent>
