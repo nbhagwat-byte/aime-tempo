@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLanguage } from '@/app/contexts/LanguageContext';
@@ -30,12 +30,28 @@ export function TeamManagement() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [role, setRole] = useState<'painter' | 'supervisor'>('painter');
   const [hourlyRate, setHourlyRate] = useState('');
   const [language, setLanguage] = useState<'en' | 'es'>('en');
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const users = getUsers();
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const team = await getUsers();
+      setUsers(team);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load team');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
   const painters = users.filter((u) => u.role === 'painter');
   const avgRate = painters.length ? painters.reduce((s, u) => s + u.hourlyRate, 0) / painters.length : 0;
 
@@ -43,7 +59,6 @@ export function TeamManagement() {
     setEditingUser(null);
     setName('');
     setEmail('');
-    setPassword('');
     setRole('painter');
     setHourlyRate('');
     setLanguage('en');
@@ -53,43 +68,51 @@ export function TeamManagement() {
   const openEdit = (u: User) => {
     setEditingUser(u);
     setName(u.name);
-    setEmail(u.email);
-    setPassword(u.password);
+    setEmail(u.email ?? '');
     setRole(u.role);
     setHourlyRate(String(u.hourlyRate));
     setLanguage(u.language);
     setDialogOpen(true);
   };
 
-  const handleSave = () => {
-    if (!name.trim() || !email.trim()) {
-      toast.error('Name and email required');
+  const handleSave = async () => {
+    if (!name.trim()) {
+      toast.error('Name required');
       return;
     }
-    if (!editingUser && (!password || password.length < 6)) {
-      toast.error('Password min 6 characters');
+    if (!editingUser) {
+      toast.info('To add a team member, create their account in Supabase Dashboard → Authentication → Users, then add a profile row (or have them sign in once). Refresh this page to see them.');
+      setDialogOpen(false);
       return;
     }
-    const id = editingUser?.id ?? `u-${Date.now()}`;
-    const user: User = {
-      id,
-      name: name.trim(),
-      email: email.trim(),
-      password: password || (editingUser?.password ?? ''),
-      role,
-      hourlyRate: parseFloat(hourlyRate) || 0,
-      language,
-    };
-    saveUser(user);
-    toast.success('Saved');
-    setDialogOpen(false);
+    try {
+      await saveUser({
+        id: editingUser.id,
+        name: name.trim(),
+        role,
+        hourlyRate: parseFloat(hourlyRate) || 0,
+        language,
+      });
+      toast.success('Saved');
+      setDialogOpen(false);
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save');
+    }
   };
 
-  const handleDelete = (u: User) => {
+  const handleDelete = async (u: User) => {
     if (!confirm(t('common.delete') + '?')) return;
-    deleteUser(u.id);
-    toast.success('Removed');
+    try {
+      await deleteUser(u.id);
+      toast.success('Removed');
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete');
+    }
   };
+
+  if (loading) return null;
 
   return (
     <div className="space-y-6">
@@ -160,20 +183,13 @@ export function TeamManagement() {
               <Label>{t('supervisor.name')}</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} required />
             </div>
-            <div>
-              <Label>{t('supervisor.email')}</Label>
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </div>
-            <div>
-              <Label>{t('supervisor.password')}</Label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={editingUser ? 'Leave blank to keep' : ''}
-                minLength={editingUser ? 0 : 6}
-              />
-            </div>
+            {editingUser && (
+              <div>
+                <Label>{t('supervisor.email')}</Label>
+                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled className="bg-gray-100" />
+                <p className="text-xs text-gray-500">Email is managed in Supabase Authentication.</p>
+              </div>
+            )}
             <div>
               <Label>{t('supervisor.role')}</Label>
               <Select value={role} onValueChange={(v: 'painter' | 'supervisor') => setRole(v)}>
@@ -213,4 +229,3 @@ export function TeamManagement() {
     </div>
   );
 }
-
