@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/app/contexts/AuthContext';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import {
@@ -17,17 +18,38 @@ interface WorkNotificationBannerProps {
 export function WorkNotificationBanner({ onOpenCorrection }: WorkNotificationBannerProps) {
   const { currentUser } = useAuth();
   const { t } = useLanguage();
+  const [dismissed, setDismissed] = useState<boolean>(true);
+  const [hasWorkToday, setHasWorkToday] = useState<boolean>(true);
 
   if (!currentUser) return null;
 
-  const dismissed = isWorkNotificationDismissed(currentUser.id);
   const now = new Date();
   const after8am = now.getHours() >= 8;
-  const activeLog = getActiveTimeLog(currentUser.id);
-  const todayLogs = getUserTimeLogs(currentUser.id).filter(
-    (l) => l.checkOut && isToday(new Date(l.checkIn))
-  );
-  const hasWorkToday = activeLog || todayLogs.length > 0;
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [isDismissed, activeLog, logs] = await Promise.all([
+          isWorkNotificationDismissed(currentUser.id),
+          getActiveTimeLog(currentUser.id),
+          getUserTimeLogs(currentUser.id),
+        ]);
+        if (!active) return;
+        const todayLogs = logs.filter((l) => l.checkOut && isToday(new Date(l.checkIn)));
+        setDismissed(isDismissed);
+        setHasWorkToday(Boolean(activeLog) || todayLogs.length > 0);
+      } catch {
+        // Fail closed: do not show banner if we can't verify.
+        if (!active) return;
+        setDismissed(true);
+        setHasWorkToday(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [currentUser.id]);
 
   const show = after8am && !hasWorkToday && !dismissed;
 
@@ -44,7 +66,10 @@ export function WorkNotificationBanner({ onOpenCorrection }: WorkNotificationBan
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setWorkNotificationDismissed(currentUser.id, true)}
+            onClick={async () => {
+              await setWorkNotificationDismissed(currentUser.id, true);
+              setDismissed(true);
+            }}
           >
             {t('painter.dismiss')}
           </Button>
