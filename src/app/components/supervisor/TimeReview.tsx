@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import {
   getTimeLogs,
@@ -31,13 +31,39 @@ export function TimeReview() {
   const [painterFilter, setPainterFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [corrections, setCorrections] = useState<any[]>([]);
+  const [allLogs, setAllLogs] = useState<any[]>([]);
 
-  const projects = getProjects().filter((p) => !p.isPending);
-  const users = getUsers();
-  const corrections = getTimeCorrections();
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const [projs, team, corr, logs] = await Promise.all([
+          getProjects(),
+          getUsers(),
+          getTimeCorrections(),
+          getTimeLogs(),
+        ]);
+        if (!active) return;
+        setProjects(projs.filter((p) => !p.isPending));
+        setUsers(team);
+        setCorrections(corr);
+        setAllLogs(logs);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const logs = useMemo(() => {
-    let list = getTimeLogs().filter((l) => l.checkOut);
+    let list = allLogs.filter((l) => l.checkOut);
     const from = startOfDay(new Date(dateFrom));
     const to = endOfDay(new Date(dateTo));
     list = list.filter((l) => {
@@ -49,7 +75,7 @@ export function TimeReview() {
     if (statusFilter === 'completed') list = list.filter((l) => l.status === 'completed');
     if (statusFilter === 'pending_review') list = list.filter((l) => l.status === 'pending_review' || l.status === 'pending_correction');
     return list.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
-  }, [dateFrom, dateTo, projectFilter, painterFilter, statusFilter]);
+  }, [allLogs, dateFrom, dateTo, projectFilter, painterFilter, statusFilter]);
 
   const paginated = logs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.ceil(logs.length / PAGE_SIZE);
@@ -61,6 +87,8 @@ export function TimeReview() {
   }, [logs, corrections]);
 
   const hasPendingCorrection = (logId: string) => corrections.some((c) => c.timeLogId === logId && c.status === 'pending');
+
+  if (loading) return null;
 
   return (
     <div className="space-y-6">
