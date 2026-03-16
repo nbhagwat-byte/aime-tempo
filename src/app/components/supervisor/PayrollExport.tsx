@@ -1,13 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import { useLanguage } from '@/app/contexts/LanguageContext';
-import {
-  getTimeLogs,
-  getUsers,
-  getProjects,
-  calculateHours,
-  type PayrollEntry,
-} from '@/app/utils/dataManager';
+import { getTimeLogs, getUsers, calculateHours } from '@/app/utils/dataManager';
+import type { PayrollEntry } from '@/app/types';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent } from '@/app/components/ui/card';
@@ -38,18 +33,38 @@ export function PayrollExport() {
     }
   }, [range, customFrom, customTo, now]);
 
+  const [users, setUsers] = useState<Awaited<ReturnType<typeof getUsers>>>([]);
+  const [logs, setLogs] = useState<Awaited<ReturnType<typeof getTimeLogs>>>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [team, timeLogs] = await Promise.all([getUsers(), getTimeLogs()]);
+        if (!cancelled) {
+          setUsers(team);
+          setLogs(timeLogs);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const entries = useMemo((): PayrollEntry[] => {
-    const users = getUsers().filter((u) => u.role === 'painter');
-    const logs = getTimeLogs().filter((l) => l.checkOut);
+    const painters = users.filter((u) => u.role === 'painter');
+    const completedLogs = logs.filter((l) => l.checkOut);
     const from = startDate.getTime();
     const to = endDate.getTime();
 
     const byUser: Record<string, { hours: number; projects: Set<string> }> = {};
-    users.forEach((u) => {
+    painters.forEach((u) => {
       byUser[u.id] = { hours: 0, projects: new Set() };
     });
 
-    logs.forEach((log) => {
+    completedLogs.forEach((log) => {
       const d = new Date(log.checkIn).getTime();
       if (d < from || d > to) return;
       const user = byUser[log.userId];
@@ -59,7 +74,7 @@ export function PayrollExport() {
       user.projects.add(log.projectId);
     });
 
-    return users.map((u) => {
+    return painters.map((u) => {
       const data = byUser[u.id];
       const totalHours = data?.hours ?? 0;
       return {
@@ -71,9 +86,11 @@ export function PayrollExport() {
         projectsWorked: (data?.projects.size ?? 0) as number,
       };
     }).filter((e) => e.totalHours > 0);
-  }, [startDate, endDate]);
+  }, [users, logs, startDate, endDate]);
 
   const grandTotal = entries.reduce((s, e) => s + e.totalCost, 0);
+
+  if (loading) return null;
 
   const exportPDF = () => {
     const doc = new jsPDF();
