@@ -29,6 +29,8 @@ import {
   saveTimeLog,
   calculateHours,
 } from '@/app/utils/dataManager';
+import type { Project } from '@/app/types';
+import type { TimeLog } from '@/app/types';
 import { isSameDay, format, parseISO } from 'date-fns';
 
 interface ShiftCorrectionDialogProps {
@@ -63,12 +65,30 @@ export function ShiftCorrectionDialog({
   const [checkInTime, setCheckInTime] = useState('');
   const [checkOutTime, setCheckOutTime] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [allUserLogs, setAllUserLogs] = useState<TimeLog[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
-  const projects = getProjectsForPainter();
-  const allUserLogs = useMemo(
-    () => (currentUser ? getUserTimeLogs(currentUser.id) : []),
-    [currentUser]
-  );
+  useEffect(() => {
+    if (!open || !currentUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [projs, logs] = await Promise.all([
+          getProjectsForPainter(),
+          getUserTimeLogs(currentUser.id),
+        ]);
+        if (!cancelled) {
+          setProjects(projs);
+          setAllUserLogs(logs);
+        }
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : 'Failed to load data');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, currentUser?.id]);
+
   const todayLogs = useMemo(() => {
     const refDate = contextDate ?? new Date();
     return allUserLogs.filter(
@@ -86,35 +106,43 @@ export function ShiftCorrectionDialog({
   const selectedLog = todayLogs.find((l) => l.id === selectedLogId);
   const selectedProject = projects.find((p) => p.id === projectId);
 
-  const handleSubmitPropose = (e: React.FormEvent) => {
+  const handleSubmitPropose = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLog || !reason.trim() || reason.trim().length < 10 || !currentUser) return;
-    const origTime = correctionType === 'check_in' ? selectedLog.checkIn : selectedLog.checkOut!;
-    let reqTime = requestedTime || origTime;
-    if (contextDate && selectedLog && requestedTime && requestedTime.length <= 5) {
-      const refDate = new Date(selectedLog.checkIn);
-      reqTime = `${format(refDate, 'yyyy-MM-dd')}T${requestedTime}:00.000`;
+    setSubmitting(true);
+    try {
+      const origTime = correctionType === 'check_in' ? selectedLog.checkIn : selectedLog.checkOut!;
+      let reqTime = requestedTime || origTime;
+      if (contextDate && selectedLog && requestedTime && requestedTime.length <= 5) {
+        const refDate = new Date(selectedLog.checkIn);
+        reqTime = `${format(refDate, 'yyyy-MM-dd')}T${requestedTime}:00.000`;
+      }
+      const correction = {
+        id: crypto.randomUUID(),
+        timeLogId: selectedLog.id,
+        userId: currentUser.id,
+        requestedTime: new Date(reqTime).toISOString(),
+        originalTime: origTime,
+        type: correctionType,
+        reason: reason.trim(),
+        status: 'pending' as const,
+        createdAt: new Date().toISOString(),
+        denialReason: undefined as string | undefined,
+      };
+      await saveTimeCorrection(correction);
+      toast.success(t('painter.correctionSubmitted'));
+      setSelectedLogId('');
+      setRequestedTime('');
+      setReason('');
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to submit');
+    } finally {
+      setSubmitting(false);
     }
-    const correction = {
-      id: `corr-${Date.now()}`,
-      timeLogId: selectedLog.id,
-      userId: currentUser.id,
-      requestedTime: new Date(reqTime).toISOString(),
-      originalTime: origTime,
-      type: correctionType,
-      reason: reason.trim(),
-      status: 'pending' as const,
-      createdAt: new Date().toISOString(),
-    };
-    saveTimeCorrection(correction);
-    toast.success(t('painter.correctionSubmitted'));
-    setSelectedLogId('');
-    setRequestedTime('');
-    setReason('');
-    onOpenChange(false);
   };
 
-  const handleSubmitMissing = (e: React.FormEvent) => {
+  const handleSubmitMissing = async (e: React.FormEvent) => {
     e.preventDefault();
     const finalReason = reason.trim().length >= 10 ? reason : `[NEW SHIFT] ${reason}`;
     if (!currentUser) return;
@@ -125,9 +153,8 @@ export function ShiftCorrectionDialog({
     let targetProjectId = projectId;
     if (projectId === '__new__') {
       targetProjectId = `proj-new-${Date.now()}`;
-      // For demo we don't create project; we store in reason that it's new project
     }
-    const logId = `log-${Date.now()}`;
+    const logId = crypto.randomUUID();
     const baseDate = contextDate ?? new Date();
     const checkIn =
       contextDate && checkInTime
@@ -141,57 +168,66 @@ export function ShiftCorrectionDialog({
       toast.error('Check-out must be after check-in');
       return;
     }
-    const logs = getTimeLogs();
-    const overlapping = logs.filter(
-      (l) =>
-        l.userId === currentUser.id &&
-        l.checkOut &&
-        (new Date(l.checkIn) < new Date(checkOut) && new Date(l.checkOut!) > new Date(checkIn))
-    );
-    if (overlapping.length > 0) {
-      toast.error('Overlapping shift');
-      return;
+    setSubmitting(true);
+    try {
+      const logs = await getTimeLogs();
+      const overlapping = logs.filter(
+        (l) =>
+          l.userId === currentUser.id &&
+          l.checkOut &&
+          (new Date(l.checkIn) < new Date(checkOut) && new Date(l.checkOut!) > new Date(checkIn))
+      );
+      if (overlapping.length > 0) {
+        toast.error('Overlapping shift');
+        return;
+      }
+      const newLog: TimeLog = {
+        id: logId,
+        userId: currentUser.id,
+        projectId: targetProjectId,
+        checkIn,
+        checkOut,
+        location: { lat: 0, lng: 0, accuracy: 0 },
+        status: 'pending_review',
+        syncStatus: 'pending',
+      };
+      await saveTimeLog(newLog);
+      await saveTimeCorrection({
+        id: crypto.randomUUID(),
+        timeLogId: logId,
+        userId: currentUser.id,
+        requestedTime: checkIn,
+        originalTime: checkIn,
+        type: 'check_in',
+        reason: projectId === '__new__' ? `[NEW SHIFT + NEW PROJECT: ${newProjectName}] ${finalReason}` : finalReason,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        denialReason: undefined,
+      });
+      await saveTimeCorrection({
+        id: crypto.randomUUID(),
+        timeLogId: logId,
+        userId: currentUser.id,
+        requestedTime: checkOut,
+        originalTime: checkOut,
+        type: 'check_out',
+        reason: finalReason,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        denialReason: undefined,
+      });
+      toast.success(t('painter.correctionSubmitted'));
+      setReason('');
+      setProjectId('');
+      setCheckInTime('');
+      setCheckOutTime('');
+      setNewProjectName('');
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to submit');
+    } finally {
+      setSubmitting(false);
     }
-    const newLog = {
-      id: logId,
-      userId: currentUser.id,
-      projectId: targetProjectId,
-      checkIn,
-      checkOut,
-      location: { lat: 0, lng: 0, accuracy: 0 },
-      status: 'pending_review' as const,
-      syncStatus: 'pending' as const,
-    };
-    saveTimeLog(newLog);
-    saveTimeCorrection({
-      id: `corr-in-${Date.now()}`,
-      timeLogId: logId,
-      userId: currentUser.id,
-      requestedTime: checkIn,
-      originalTime: checkIn,
-      type: 'check_in',
-      reason: projectId === '__new__' ? `[NEW SHIFT + NEW PROJECT: ${newProjectName}] ${finalReason}` : finalReason,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-    });
-    saveTimeCorrection({
-      id: `corr-out-${Date.now()}`,
-      timeLogId: logId,
-      userId: currentUser.id,
-      requestedTime: checkOut,
-      originalTime: checkOut,
-      type: 'check_out',
-      reason: finalReason,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-    });
-    toast.success(t('painter.correctionSubmitted'));
-    setReason('');
-    setProjectId('');
-    setCheckInTime('');
-    setCheckOutTime('');
-    setNewProjectName('');
-    onOpenChange(false);
   };
 
   return (
@@ -300,8 +336,8 @@ export function ShiftCorrectionDialog({
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   {t('common.cancel')}
                 </Button>
-                <Button type="submit" disabled={!selectedLogId || reason.trim().length < 10}>
-                  {t('common.submit')}
+                <Button type="submit" disabled={!selectedLogId || reason.trim().length < 10 || submitting}>
+                  {submitting ? '...' : t('common.submit')}
                 </Button>
               </DialogFooter>
             </form>
@@ -372,8 +408,8 @@ export function ShiftCorrectionDialog({
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   {t('common.cancel')}
                 </Button>
-                <Button type="submit">
-                  {t('common.submit')}
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? '...' : t('common.submit')}
                 </Button>
               </DialogFooter>
             </form>
