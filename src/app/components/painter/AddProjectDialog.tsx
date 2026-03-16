@@ -13,7 +13,7 @@ import { Label } from '@/app/components/ui/label';
 import { Slider } from '@/app/components/ui/slider';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useAuth } from '@/app/contexts/AuthContext';
-import { getPendingProjects, savePendingProject } from '@/app/utils/dataManager';
+import { savePendingProject } from '@/app/utils/dataManager';
 
 interface AddProjectDialogProps {
   open: boolean;
@@ -27,13 +27,12 @@ export function AddProjectDialog({ open, onOpenChange, onRequested }: AddProject
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [radius, setRadius] = useState(100);
-  const [geocoding, setGeocoding] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !address.trim() || !currentUser) return;
     const pending = {
-      id: `pending-${Date.now()}`,
+      id: crypto.randomUUID(),
       name: name.trim(),
       address: address.trim(),
       radius,
@@ -41,8 +40,14 @@ export function AddProjectDialog({ open, onOpenChange, onRequested }: AddProject
       requestedBy: currentUser.id,
       createdAt: new Date().toISOString(),
     };
-    savePendingProject(pending);
-    toast.success(t('painter.projectRequestSubmitted'));
+    try {
+      await savePendingProject(pending);
+      toast.success(t('painter.projectRequestSubmitted'));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to submit project request';
+      toast.error(msg);
+      return;
+    }
     setName('');
     setAddress('');
     setRadius(100);
