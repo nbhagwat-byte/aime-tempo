@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import {
@@ -12,6 +12,7 @@ import {
   getPendingProjects,
   deletePendingProject,
 } from '@/app/utils/dataManager';
+import type { TimeCorrection, User, Project, TimeLog } from '@/app/types';
 import { format } from 'date-fns';
 import { Button } from '@/app/components/ui/button';
 import { Card, CardContent } from '@/app/components/ui/card';
@@ -30,18 +31,42 @@ export function PendingProjectsQueue() {
   const { t } = useLanguage();
   const [denyDialog, setDenyDialog] = useState<{ id: string; userId: string } | null>(null);
   const [denialReason, setDenialReason] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [allCorrections, setAllCorrections] = useState<TimeCorrection[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [timeLogs, setTimeLogs] = useState<TimeLog[]>([]);
 
-  const allCorrections = getTimeCorrections();
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const [corr, team, projs, logs] = await Promise.all([
+        getTimeCorrections(),
+        getUsers(),
+        getProjects(),
+        getTimeLogs(),
+      ]);
+      setAllCorrections(corr);
+      setUsers(team);
+      setProjects(projs);
+      setTimeLogs(logs);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
   const pendingCorrections = allCorrections.filter((c) => c.status === 'pending');
   const historyCorrections = [...allCorrections]
     .filter((c) => c.status === 'approved' || c.status === 'denied')
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  const users = getUsers();
-  const projects = getProjects();
-  const timeLogs = getTimeLogs();
-
-  const handleApprove = (correctionId: string) => {
+  const handleApprove = async (correctionId: string) => {
     const corr = pendingCorrections.find((c) => c.id === correctionId);
     if (!corr) return;
 
@@ -49,52 +74,67 @@ export function PendingProjectsQueue() {
     const hasNewProject = (reason.includes('NEW PROJECT') || reason.includes('NUEVO PROYECTO')) && corr.type === 'check_in';
     const newProjectMatch = reason.match(/NEW PROJECT:\s*([^\]]+)/i) || reason.match(/NUEVO PROYECTO:\s*([^\]]+)/i);
 
-    if (hasNewProject && newProjectMatch) {
-      const projectName = newProjectMatch[1].trim();
-      const pending = getPendingProjects().find((p) => p.requestedBy === corr.userId);
-      const newProject = {
-        id: `proj-${Date.now()}`,
-        name: projectName,
-        address: pending?.address ?? 'TBD',
-        location: { lat: 40.7128, lng: -74.006 },
-        radius: pending?.radius ?? 100,
-        active: true,
-      };
-      saveProject(newProject);
-      if (pending) deletePendingProject(pending.id);
-      const log = timeLogs.find((l) => l.id === corr.timeLogId);
-      if (log && log.projectId.startsWith('proj-new-')) {
-        saveTimeLog({ ...log, projectId: newProject.id });
-      }
-      saveTimeCorrection({ ...corr, status: 'approved' });
-      toast.success(t('supervisor.correctionApproved') + ' New project added.');
-    } else {
-      const log = timeLogs.find((l) => l.id === corr.timeLogId);
-      if (log) {
-        if (corr.type === 'check_in') {
-          saveTimeLog({ ...log, checkIn: corr.requestedTime });
-        } else {
-          saveTimeLog({ ...log, checkOut: corr.requestedTime });
+    try {
+      if (hasNewProject && newProjectMatch) {
+        const projectName = newProjectMatch[1].trim();
+        const pendings = await getPendingProjects();
+        const pending = pendings.find((p) => p.requestedBy === corr.userId);
+        const newProject = {
+          id: crypto.randomUUID(),
+          name: projectName,
+          address: pending?.address ?? 'TBD',
+          location: { lat: 40.7128, lng: -74.006 },
+          radius: pending?.radius ?? 100,
+          active: true,
+          projectStatus: 'in_progress' as const,
+        };
+        await saveProject(newProject);
+        if (pending) await deletePendingProject(pending.id);
+        const log = timeLogs.find((l) => l.id === corr.timeLogId);
+        if (log && log.projectId.startsWith('proj-new-')) {
+          await saveTimeLog({ ...log, projectId: newProject.id });
         }
+        await saveTimeCorrection({ ...corr, status: 'approved' });
+        toast.success(t('supervisor.correctionApproved') + ' New project added.');
+      } else {
+        const log = timeLogs.find((l) => l.id === corr.timeLogId);
+        if (log) {
+          if (corr.type === 'check_in') {
+            await saveTimeLog({ ...log, checkIn: corr.requestedTime });
+          } else {
+            await saveTimeLog({ ...log, checkOut: corr.requestedTime });
+          }
+        }
+        await saveTimeCorrection({ ...corr, status: 'approved' });
+        toast.success(t('supervisor.correctionApproved'));
       }
-      saveTimeCorrection({ ...corr, status: 'approved' });
-      toast.success(t('supervisor.correctionApproved'));
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to approve');
     }
   };
 
-  const handleDeny = () => {
+  const handleDeny = async () => {
     if (!denyDialog) return;
     const corr = pendingCorrections.find((c) => c.id === denyDialog.id);
     if (corr) {
-      saveTimeCorrection({ ...corr, status: 'denied', denialReason });
-      toast.success(t('supervisor.correctionDenied'));
+      try {
+        await saveTimeCorrection({ ...corr, status: 'denied', denialReason });
+        toast.success(t('supervisor.correctionDenied'));
+        setDenyDialog(null);
+        setDenialReason('');
+        await refresh();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to deny');
+      }
+    } else {
+      setDenyDialog(null);
+      setDenialReason('');
     }
-    setDenyDialog(null);
-    setDenialReason('');
   };
 
   const renderCorrectionCard = (
-    corr: (typeof allCorrections)[0],
+    corr: TimeCorrection,
     showActions: boolean
   ) => {
     const user = users.find((u) => u.id === corr.userId);
@@ -167,6 +207,8 @@ export function PendingProjectsQueue() {
       </Card>
     );
   };
+
+  if (loading) return null;
 
   return (
     <div className="space-y-8">
