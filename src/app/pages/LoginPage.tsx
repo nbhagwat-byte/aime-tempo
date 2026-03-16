@@ -1,9 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { useAuth } from '@/app/contexts/AuthContext';
 import { useLanguage } from '@/app/contexts/LanguageContext';
-import { getUsers } from '@/app/utils/dataManager';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
@@ -11,21 +10,25 @@ import { Label } from '@/app/components/ui/label';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { login } = useAuth();
+  const { signInWithPassword, status, currentUser } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const users = getUsers();
-    const user = users.find((u) => u.email === email && u.password === password);
-    if (!user) {
-      toast.error('Invalid email or password');
-      return;
+  useEffect(() => {
+    if (status === 'authenticated' && currentUser) {
+      navigate(currentUser.role === 'painter' ? '/painter' : '/supervisor', { replace: true });
     }
-    login(user);
-    toast.success('Welcome back!');
-    navigate(user.role === 'painter' ? '/painter' : '/supervisor', { replace: true });
+  }, [status, currentUser, navigate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await signInWithPassword(email, password);
+      toast.success('Welcome back!');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to sign in';
+      toast.error(msg);
+    }
   };
 
   return (
@@ -87,12 +90,14 @@ export default function LoginPage() {
               autoComplete="current-password"
             />
           </div>
-          <Button type="submit" className="w-full bg-[#236B8E] hover:bg-[#062644]">
+          <Button type="submit" className="w-full bg-[#236B8E] hover:bg-[#062644]" disabled={status === 'loading'}>
             {t('auth.login')}
           </Button>
         </form>
 
-        <p className="mt-4 text-center text-xs text-gray-500">{t('auth.demoCredentials')}</p>
+        <p className="mt-4 text-center text-xs text-gray-500">
+          Use your Supabase Auth email/password.
+        </p>
       </div>
     </div>
   );
