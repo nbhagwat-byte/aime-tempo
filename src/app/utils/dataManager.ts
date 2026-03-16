@@ -1,263 +1,321 @@
-import type {
-  User,
-  Project,
-  TimeLog,
-  TimeCorrection,
-  PendingProject,
-  WorkNotification,
-} from '@/app/types';
+import type { Language, User, UserRole, Project, TimeLog, TimeCorrection, PendingProject, WorkNotification } from '@/app/types';
+import { supabase } from '@/app/utils/supabaseClient';
 
-const PREFIX = 'aime_tempo_';
-const USERS_KEY = PREFIX + 'users';
-const PROJECTS_KEY = PREFIX + 'projects';
-const TIMELOGS_KEY = PREFIX + 'timelogs';
-const CORRECTIONS_KEY = PREFIX + 'corrections';
-const PENDING_PROJECTS_KEY = PREFIX + 'pending_projects';
-const WORK_NOTIFICATIONS_KEY = PREFIX + 'work_notifications';
-const CURRENT_USER_KEY = PREFIX + 'current_user';
-const INIT_FLAG_KEY = PREFIX + 'initialized';
+function assertOk<T>(res: { data: T | null; error: unknown }, fallbackMsg: string): T {
+  if (res.error || res.data == null) {
+    const msg = res.error instanceof Error ? res.error.message : fallbackMsg;
+    throw new Error(msg);
+  }
+  return res.data;
+}
 
-// --- Mock data ---
-function getMockUsers(): User[] {
-  return [
-    {
-      id: 'u-supervisor',
-      name: 'Maria Supervisor',
-      email: 'supervisor@demo.com',
-      password: 'demo123',
-      role: 'supervisor',
-      hourlyRate: 45,
-      language: 'en',
+function mapProject(row: {
+  id: string;
+  name: string;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  radius: number;
+  active: boolean;
+  is_pending: boolean;
+  notes: string | null;
+  project_status: 'in_progress' | 'complete';
+}): Project {
+  return {
+    id: row.id,
+    name: row.name,
+    address: row.address,
+    location: { lat: Number(row.latitude ?? 0), lng: Number(row.longitude ?? 0) },
+    radius: Number(row.radius ?? 0),
+    active: Boolean(row.active),
+    isPending: Boolean(row.is_pending),
+    notes: row.notes ?? undefined,
+    projectStatus: row.project_status,
+  };
+}
+
+function mapTimeLog(row: {
+  id: string;
+  user_id: string;
+  project_id: string;
+  check_in: string;
+  check_out: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
+  status: TimeLog['status'];
+  sync_status: TimeLog['syncStatus'];
+}): TimeLog {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    projectId: row.project_id,
+    checkIn: row.check_in,
+    checkOut: row.check_out ?? undefined,
+    location: {
+      lat: Number(row.latitude ?? 0),
+      lng: Number(row.longitude ?? 0),
+      accuracy: Number(row.accuracy ?? 0),
     },
-    ...Array.from({ length: 9 }, (_, i) => ({
-      id: `u-painter-${i + 1}`,
-      name: `Painter ${i + 1}`,
-      email: i === 0 ? 'painter@demo.com' : `painter${i + 1}@demo.com`,
-      password: 'demo123',
-      role: 'painter' as const,
-      hourlyRate: 28 + (i % 3) * 2,
-      language: (i % 2 === 0 ? 'en' : 'es') as 'en' | 'es',
-    })),
-  ];
+    status: row.status,
+    syncStatus: row.sync_status,
+  };
 }
 
-function getMockProjects(): Project[] {
-  return [
-    {
-      id: 'proj-1',
-      name: 'Manhattan Tower A',
-      address: '350 5th Ave, New York, NY 10118',
-      location: { lat: 40.7484, lng: -73.9857 },
-      radius: 150,
-      active: true,
-      projectStatus: 'in_progress',
-    },
-    {
-      id: 'proj-2',
-      name: 'Brooklyn Heights Renovation',
-      address: '1 Cadman Plaza W, Brooklyn, NY 11201',
-      location: { lat: 40.6953, lng: -73.9896 },
-      radius: 100,
-      active: true,
-      projectStatus: 'in_progress',
-    },
-    {
-      id: 'proj-3',
-      name: 'Queens Blvd Office',
-      address: '1 Queens Blvd, Long Island City, NY 11101',
-      location: { lat: 40.7424, lng: -73.9376 },
-      radius: 200,
-      active: true,
-      projectStatus: 'in_progress',
-    },
-    {
-      id: 'proj-4',
-      name: 'Bronx Warehouse',
-      address: '610 Exterior St, Bronx, NY 10451',
-      location: { lat: 40.8236, lng: -73.9236 },
-      radius: 120,
-      active: true,
-      projectStatus: 'in_progress',
-    },
-    {
-      id: 'proj-5',
-      name: 'Staten Island Mall',
-      address: '2655 Richmond Ave, Staten Island, NY 10314',
-      location: { lat: 40.5834, lng: -74.1596 },
-      radius: 180,
-      active: true,
-      projectStatus: 'in_progress',
-    },
-  ];
+function mapCorrection(row: {
+  id: string;
+  time_log_id: string;
+  user_id: string;
+  requested_time: string;
+  original_time: string;
+  type: TimeCorrection['type'];
+  reason: string;
+  status: TimeCorrection['status'];
+  created_at: string;
+  denial_reason: string | null;
+}): TimeCorrection {
+  return {
+    id: row.id,
+    timeLogId: row.time_log_id,
+    userId: row.user_id,
+    requestedTime: row.requested_time,
+    originalTime: row.original_time,
+    type: row.type,
+    reason: row.reason,
+    status: row.status,
+    createdAt: row.created_at,
+    denialReason: row.denial_reason ?? undefined,
+  };
 }
 
-function getMockTimeLogs(): TimeLog[] {
-  const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  return [
-    {
-      id: 'log-1',
-      userId: 'u-painter-1',
-      projectId: 'proj-1',
-      checkIn: `${today}T08:00:00.000Z`,
-      checkOut: `${today}T12:00:00.000Z`,
-      location: { lat: 40.7484, lng: -73.9857, accuracy: 12 },
-      status: 'completed',
-      syncStatus: 'synced',
-    },
-    {
-      id: 'log-2',
-      userId: 'u-painter-1',
-      projectId: 'proj-1',
-      checkIn: `${today}T13:00:00.000Z`,
-      checkOut: `${today}T17:30:00.000Z`,
-      location: { lat: 40.7485, lng: -73.9856, accuracy: 15 },
-      status: 'completed',
-      syncStatus: 'synced',
-    },
-  ];
+function mapPendingProject(row: {
+  id: string;
+  name: string;
+  address: string;
+  radius: number;
+  status: PendingProject['status'];
+  requested_by: string;
+  created_at: string;
+}): PendingProject {
+  return {
+    id: row.id,
+    name: row.name,
+    address: row.address,
+    radius: Number(row.radius ?? 0),
+    status: row.status,
+    requestedBy: row.requested_by,
+    createdAt: row.created_at,
+  };
 }
 
-function initializeMockData(): void {
-  if (typeof window === 'undefined') return;
-  if (localStorage.getItem(INIT_FLAG_KEY)) return;
-  localStorage.setItem(USERS_KEY, JSON.stringify(getMockUsers()));
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(getMockProjects()));
-  localStorage.setItem(TIMELOGS_KEY, JSON.stringify(getMockTimeLogs()));
-  localStorage.setItem(CORRECTIONS_KEY, JSON.stringify([]));
-  localStorage.setItem(PENDING_PROJECTS_KEY, JSON.stringify([]));
-  localStorage.setItem(WORK_NOTIFICATIONS_KEY, JSON.stringify([]));
-  localStorage.setItem(INIT_FLAG_KEY, 'true');
+// --- Profiles (team) ---
+export async function getUsers(): Promise<User[]> {
+  const res = await supabase
+    .from('profiles')
+    .select('id, full_name, role, hourly_rate, language, created_at');
+  const rows = assertOk(res, 'Unable to load team');
+  return rows.map((r) => ({
+    id: r.id,
+    email: '', // email is from auth.users; not selectable with anon key
+    name: r.full_name ?? 'User',
+    role: r.role as UserRole,
+    hourlyRate: Number(r.hourly_rate ?? 0),
+    language: (r.language ?? 'en') as Language,
+  }));
 }
 
-// --- Core CRUD ---
-export function getUsers(): User[] {
-  initializeMockData();
-  const raw = localStorage.getItem(USERS_KEY);
-  return raw ? JSON.parse(raw) : [];
+export async function saveUser(user: Pick<User, 'id' | 'name' | 'role' | 'hourlyRate' | 'language'>): Promise<void> {
+  const { error } = await supabase.from('profiles').upsert({
+    id: user.id,
+    full_name: user.name,
+    role: user.role,
+    hourly_rate: user.hourlyRate,
+    language: user.language,
+  });
+  if (error) throw error;
 }
 
-export function saveUser(user: User): void {
-  const users = getUsers().filter((u) => u.id !== user.id);
-  users.push(user);
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+export async function deleteUser(id: string): Promise<void> {
+  // Note: this only deletes the profile row. The auth user must be deleted via Supabase Dashboard (admin).
+  const { error } = await supabase.from('profiles').delete().eq('id', id);
+  if (error) throw error;
 }
 
-export function deleteUser(id: string): void {
-  const users = getUsers().filter((u) => u.id !== id);
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+// --- Projects ---
+export async function getProjects(): Promise<Project[]> {
+  const res = await supabase
+    .from('projects')
+    .select('id, name, address, latitude, longitude, radius, active, is_pending, notes, project_status')
+    .eq('is_pending', false)
+    .order('created_at', { ascending: false });
+  const rows = assertOk(res, 'Unable to load projects');
+  return rows.map(mapProject);
 }
 
-export function getProjects(): Project[] {
-  initializeMockData();
-  const raw = localStorage.getItem(PROJECTS_KEY);
-  return raw ? JSON.parse(raw) : [];
+export async function getProjectsForPainter(): Promise<Project[]> {
+  const res = await supabase
+    .from('projects')
+    .select('id, name, address, latitude, longitude, radius, active, is_pending, notes, project_status')
+    .eq('is_pending', false)
+    .eq('active', true)
+    .neq('project_status', 'complete')
+    .order('created_at', { ascending: false });
+  const rows = assertOk(res, 'Unable to load projects');
+  return rows.map(mapProject);
 }
 
-/** Projects visible in painter app dropdown (active and in progress only; completed are hidden). */
-export function getProjectsForPainter(): Project[] {
-  return getProjects().filter(
-    (p) => p.active && p.projectStatus !== 'complete'
-  );
+export async function saveProject(project: Project): Promise<void> {
+  const payload = {
+    id: project.id,
+    name: project.name,
+    address: project.address,
+    latitude: project.location.lat,
+    longitude: project.location.lng,
+    radius: project.radius,
+    active: project.active,
+    is_pending: Boolean(project.isPending),
+    notes: project.notes ?? null,
+    project_status: project.projectStatus ?? 'in_progress',
+  };
+  const { error } = await supabase.from('projects').upsert(payload);
+  if (error) throw error;
 }
 
-export function saveProject(project: Project): void {
-  const projects = getProjects().filter((p) => p.id !== project.id);
-  projects.push(project);
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+export async function deleteProject(id: string): Promise<void> {
+  const { error } = await supabase.from('projects').delete().eq('id', id);
+  if (error) throw error;
 }
 
-export function deleteProject(id: string): void {
-  const projects = getProjects().filter((p) => p.id !== id);
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+// --- Time logs ---
+export async function getTimeLogs(): Promise<TimeLog[]> {
+  const res = await supabase
+    .from('time_logs')
+    .select('id, user_id, project_id, check_in, check_out, latitude, longitude, accuracy, status, sync_status')
+    .order('check_in', { ascending: false });
+  const rows = assertOk(res, 'Unable to load time logs');
+  return rows.map(mapTimeLog);
 }
 
-export function getTimeLogs(): TimeLog[] {
-  initializeMockData();
-  const raw = localStorage.getItem(TIMELOGS_KEY);
-  return raw ? JSON.parse(raw) : [];
+export async function getUserTimeLogs(userId: string): Promise<TimeLog[]> {
+  const res = await supabase
+    .from('time_logs')
+    .select('id, user_id, project_id, check_in, check_out, latitude, longitude, accuracy, status, sync_status')
+    .eq('user_id', userId)
+    .order('check_in', { ascending: false });
+  const rows = assertOk(res, 'Unable to load time logs');
+  return rows.map(mapTimeLog);
 }
 
-export function saveTimeLog(log: TimeLog): void {
-  const logs = getTimeLogs().filter((l) => l.id !== log.id);
-  logs.push(log);
-  localStorage.setItem(TIMELOGS_KEY, JSON.stringify(logs));
+export async function getActiveTimeLog(userId: string): Promise<TimeLog | null> {
+  const res = await supabase
+    .from('time_logs')
+    .select('id, user_id, project_id, check_in, check_out, latitude, longitude, accuracy, status, sync_status')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('check_in', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (res.error) throw res.error;
+  return res.data ? mapTimeLog(res.data) : null;
 }
 
-export function getTimeCorrections(): TimeCorrection[] {
-  initializeMockData();
-  const raw = localStorage.getItem(CORRECTIONS_KEY);
-  return raw ? JSON.parse(raw) : [];
+export async function saveTimeLog(log: TimeLog): Promise<void> {
+  const payload = {
+    id: log.id,
+    user_id: log.userId,
+    project_id: log.projectId,
+    check_in: log.checkIn,
+    check_out: log.checkOut ?? null,
+    latitude: log.location.lat,
+    longitude: log.location.lng,
+    accuracy: log.location.accuracy,
+    status: log.status,
+    sync_status: log.syncStatus,
+  };
+  const { error } = await supabase.from('time_logs').upsert(payload);
+  if (error) throw error;
 }
 
-export function saveTimeCorrection(correction: TimeCorrection): void {
-  const list = getTimeCorrections().filter((c) => c.id !== correction.id);
-  list.push(correction);
-  localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(list));
+// --- Time corrections ---
+export async function getTimeCorrections(): Promise<TimeCorrection[]> {
+  const res = await supabase
+    .from('time_corrections')
+    .select('id, time_log_id, user_id, requested_time, original_time, type, reason, status, created_at, denial_reason')
+    .order('created_at', { ascending: false });
+  const rows = assertOk(res, 'Unable to load corrections');
+  return rows.map(mapCorrection);
 }
 
-export function getPendingProjects(): PendingProject[] {
-  initializeMockData();
-  const raw = localStorage.getItem(PENDING_PROJECTS_KEY);
-  return raw ? JSON.parse(raw) : [];
+export async function saveTimeCorrection(correction: TimeCorrection): Promise<void> {
+  const payload = {
+    id: correction.id,
+    time_log_id: correction.timeLogId,
+    user_id: correction.userId,
+    requested_time: correction.requestedTime,
+    original_time: correction.originalTime,
+    type: correction.type,
+    reason: correction.reason,
+    status: correction.status,
+    denial_reason: correction.denialReason ?? null,
+  };
+  const { error } = await supabase.from('time_corrections').upsert(payload);
+  if (error) throw error;
 }
 
-export function savePendingProject(project: PendingProject): void {
-  const list = getPendingProjects().filter((p) => p.id !== project.id);
-  list.push(project);
-  localStorage.setItem(PENDING_PROJECTS_KEY, JSON.stringify(list));
+// --- Pending projects ---
+export async function getPendingProjects(): Promise<PendingProject[]> {
+  const res = await supabase
+    .from('pending_projects')
+    .select('id, name, address, radius, status, requested_by, created_at')
+    .order('created_at', { ascending: false });
+  const rows = assertOk(res, 'Unable to load pending projects');
+  return rows.map(mapPendingProject);
 }
 
-export function deletePendingProject(id: string): void {
-  const list = getPendingProjects().filter((p) => p.id !== id);
-  localStorage.setItem(PENDING_PROJECTS_KEY, JSON.stringify(list));
+export async function savePendingProject(project: PendingProject): Promise<void> {
+  const payload = {
+    id: project.id,
+    name: project.name,
+    address: project.address,
+    radius: project.radius,
+    status: project.status,
+    requested_by: project.requestedBy,
+  };
+  const { error } = await supabase.from('pending_projects').upsert(payload);
+  if (error) throw error;
 }
 
-function getWorkNotificationsRaw(): WorkNotification[] {
-  initializeMockData();
-  const raw = localStorage.getItem(WORK_NOTIFICATIONS_KEY);
-  return raw ? JSON.parse(raw) : [];
+export async function deletePendingProject(id: string): Promise<void> {
+  const { error } = await supabase.from('pending_projects').delete().eq('id', id);
+  if (error) throw error;
 }
 
-export function setWorkNotificationDismissed(userId: string, dismissed: boolean): void {
-  const list = getWorkNotificationsRaw();
-  const existing = list.find((n) => n.userId === userId);
-  const entry: WorkNotification = {
+// --- Work notifications ---
+export async function isWorkNotificationDismissed(userId: string): Promise<boolean> {
+  const res = await supabase
+    .from('work_notifications')
+    .select('id, dismissed')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (res.error) throw res.error;
+  return res.data?.dismissed ?? false;
+}
+
+export async function setWorkNotificationDismissed(userId: string, dismissed: boolean): Promise<void> {
+  // Upsert a notification marker for the user.
+  const payload: WorkNotification = {
     userId,
     dismissed,
     timestamp: new Date().toISOString(),
   };
-  if (existing) {
-    const next = list.map((n) => (n.userId === userId ? entry : n));
-    localStorage.setItem(WORK_NOTIFICATIONS_KEY, JSON.stringify(next));
-  } else {
-    localStorage.setItem(WORK_NOTIFICATIONS_KEY, JSON.stringify([...list, entry]));
-  }
-}
-
-export function isWorkNotificationDismissed(userId: string): boolean {
-  const list = getWorkNotificationsRaw();
-  const n = list.find((x) => x.userId === userId);
-  return n?.dismissed ?? false;
-}
-
-// --- Helpers ---
-export function getCurrentUser(): User | null {
-  const raw = localStorage.getItem(CURRENT_USER_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
-
-export function setCurrentUser(user: User | null): void {
-  if (user) localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-  else localStorage.removeItem(CURRENT_USER_KEY);
-}
-
-export function getActiveTimeLog(userId: string): TimeLog | null {
-  return getTimeLogs().find((l) => l.userId === userId && l.status === 'active') ?? null;
-}
-
-export function getUserTimeLogs(userId: string): TimeLog[] {
-  return getTimeLogs().filter((l) => l.userId === userId);
+  const { error } = await supabase.from('work_notifications').insert({
+    user_id: payload.userId,
+    dismissed: payload.dismissed,
+    timestamp: payload.timestamp,
+  });
+  if (error) throw error;
 }
 
 export function calculateHours(checkIn: string, checkOut: string): number {
@@ -289,15 +347,23 @@ export function isWithinGeofence(
   return R * c <= radius;
 }
 
-export function getMockLocation(): Promise<{ lat: number; lng: number; accuracy: number }> {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        lat: 40.7128 + (Math.random() - 0.5) * 0.001,
-        lng: -74.006 + (Math.random() - 0.5) * 0.001,
-        accuracy: 10 + Math.random() * 20,
-      });
-    }, 1500);
+export function getCurrentLocation(): Promise<{ lat: number; lng: number; accuracy: number }> {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) {
+      reject(new Error('Geolocation is not available on this device/browser.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+      },
+      (err) => reject(new Error(err.message || 'Unable to get current location')),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
   });
 }
 
