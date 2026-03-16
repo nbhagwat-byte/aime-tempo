@@ -1,11 +1,17 @@
+export type UserRole = 'painter' | 'supervisor';
+export type Language = 'en' | 'es';
+
+/**
+ * App identity is derived from Supabase Auth (auth.users) + public.profiles.
+ * We keep a lightweight user model on the client for UI + route guards.
+ */
 export interface User {
-  id: string;
-  name: string;
+  id: string; // auth.user.id
   email: string;
-  password: string;
-  role: 'painter' | 'supervisor';
+  name: string;
+  role: UserRole;
   hourlyRate: number;
-  language: 'en' | 'es';
+  language: Language;
 }
 
 export interface Project {
@@ -63,6 +69,7 @@ export interface PendingProject {
 }
 
 export interface WorkNotification {
+  id?: string;
   userId: string;
   dismissed: boolean;
   timestamp: string;
