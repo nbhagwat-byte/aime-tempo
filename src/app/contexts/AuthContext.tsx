@@ -21,41 +21,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     async function hydrate() {
-      const { data, error } = await supabase.auth.getSession();
-      if (!active) return;
-      if (error || !data.session?.user) {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!active) return;
+        if (error || !data.session?.user) {
+          setCurrentUser(null);
+          setStatus('unauthenticated');
+          return;
+        }
+
+        const { user } = data.session;
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, full_name, role, hourly_rate, language')
+          .eq('id', user.id)
+          .single();
+
+        if (!active) return;
+        if (profileError || !profile) {
+          setCurrentUser(null);
+          setStatus('unauthenticated');
+          return;
+        }
+
+        setCurrentUser({
+          id: user.id,
+          email: user.email ?? '',
+          name: profile.full_name ?? user.email ?? 'User',
+          role: profile.role,
+          hourlyRate: Number(profile.hourly_rate ?? 0),
+          language: profile.language ?? 'en',
+        });
+        setStatus('authenticated');
+      } catch (_err) {
+        if (!active) return;
         setCurrentUser(null);
         setStatus('unauthenticated');
-        return;
       }
-
-      const { user } = data.session;
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, full_name, role, hourly_rate, language')
-        .eq('id', user.id)
-        .single();
-
-      if (!active) return;
-      if (profileError || !profile) {
-        // Session exists but profile missing: treat as unauthenticated in-app until profile is created.
-        setCurrentUser(null);
-        setStatus('unauthenticated');
-        return;
-      }
-
-      setCurrentUser({
-        id: user.id,
-        email: user.email ?? '',
-        name: profile.full_name ?? user.email ?? 'User',
-        role: profile.role,
-        hourlyRate: Number(profile.hourly_rate ?? 0),
-        language: profile.language ?? 'en',
-      });
-      setStatus('authenticated');
     }
 
-    hydrate();
+    void hydrate();
+
+    const timeoutId = window.setTimeout(() => {
+      setStatus((prev) => (prev === 'loading' ? 'unauthenticated' : prev));
+    }, 8000);
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!active) return;
@@ -93,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      window.clearTimeout(timeoutId);
       sub.subscription.unsubscribe();
     };
   }, []);
